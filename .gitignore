@@ -1,24 +1,67 @@
-# Logs
-logs
-*.log
+# =========================================
+# 依存関係
+# node_modulesは `npm install` や `yarn` で再生成できるので除外します
+# =========================================
+node_modules/
+
+# =========================================
+# ビルド成果物
+# `npm run build` で生成されるフォルダです
+# =========================================
+dist/
+build/
+.next/
+out/
+.vercel/
+
+# =========================================
+# 環境変数ファイル
+# APIキーなどの機密情報を含むため、絶対にGitに含めないでください
+# .env.example のようなテンプレートファイルはGitに含めます
+# =========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# =========================================
+# ログファイル
+# =========================================
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# =========================================
+# OS・エディタ固有のファイル
+# 開発者個人の環境に依存するファイルです
+# =========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
 
-# Editor directories and files
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# VSCode
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+!.vscode/settings.json
+
+# JetBrains (WebStorm, etc.)
+.idea/
+
+# =========================================
+# テスト・カバレッジレポート
+# =========================================
+coverage/
+
+# =========================================
+# その他
+# =========================================
+# Viteのキャッシュ
+.vite/
