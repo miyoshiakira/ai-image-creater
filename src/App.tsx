@@ -1,11 +1,13 @@
 import './App.css'
-import CsvUploadPage from './component/CsvUploadPage'
-
+import TextChat from './component/TextChat'
+import PopCreatePage from './component/PopCreatePage'
+import { useState } from 'react';
 function App() {
-
+  const [thoughts, setThoughts] = useState<string>('');
   return (
     <>
-      <CsvUploadPage />
+      <TextChat onChange={(res: string) => setThoughts(res)} />
+      <PopCreatePage thoughts={thoughts} />
     </>
   )
 }

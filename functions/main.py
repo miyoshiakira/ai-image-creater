@@ -1,3 +1,4 @@
+import base64
 import datetime
 import os
 import io
@@ -23,7 +24,7 @@ initialize_app()
 set_global_options(max_instances=10)
 
 # 環境変数からOpenAI APIキーを取得
-openai_api_key = "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"
+openai_api_key = "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"
 client = OpenAI(api_key=openai_api_key)
 headers = {
     'Access-Control-Allow-Origin': '*',
@@ -179,16 +180,13 @@ def generate_and_save_image(req: https_fn.Request) -> https_fn.Response:
     try:
         # OpenAI DALL-E 3 APIを呼び出し
         response = client.images.generate(
-            model="dall-e-3",
+            model="gpt-image-1",  # ←ここを変更
             prompt=prompt,
-            n=1,
-            size="1024x1024"
         )
-        image_url = response.data[0].url
 
-        # 画像データをダウンロード
-        import requests
-        image_data = requests.get(image_url).content
+        # base64エンコードされた画像データを取得し、バイトデータにデコード
+        image_data = response.data[0].b64_json
+        image_bytes = base64.b64decode(image_data)
 
         # ファイル名を生成（タイムスタンプとハッシュを含めることで重複を避ける）
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -198,17 +196,47 @@ def generate_and_save_image(req: https_fn.Request) -> https_fn.Response:
         blob = bucket.blob(f"images/{file_name}")
 
         # Storageに画像をアップロード
-        blob.upload_from_string(image_data, content_type='image/png')
+        blob.upload_from_string(image_bytes, content_type='image/png')
 
         response_message = f'画像 "{file_name}" を正常に生成・アップロードしました。'
         print(response_message)
 
-        return create_response(jsonify({"message": "成功しました！"}))
+        return create_response(jsonify({"message": "成功しました！","image_data":image_data}))
 
     except Exception as e:
         error_message = f'エラー: 画像の生成またはアップロードに失敗しました - {str(e)}'
         print(error_message)
         return create_response(jsonify({"message": error_message}))
+
+
+@https_fn.on_request()
+def chat_with_openai(req: https_fn.Request) -> https_fn.Response:
+    try:
+        # Get the user's message from the request
+        prompt = req.args.get("prompt")
+        if not prompt:
+            return create_response(jsonify({"error": "Prompt is missing."}))
+
+        # Create a conversation with a single user message
+        chat_completion = client.chat.completions.create(
+            messages=[
+                # 以下のように、`role`と`content`を明確に指定する
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            model="gpt-4o",
+            timeout=180.0
+        )
+
+        # Extract the assistant's reply
+        reply = chat_completion.choices[0].message.content
+
+        return create_response(jsonify({"success": True, "reply": reply}))
+
+    except Exception as e:
+        return create_response(jsonify({"error": str(e)}))
 
 def create_response(res: jsonify):
     response = res
