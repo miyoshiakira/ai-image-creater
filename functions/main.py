@@ -1,13 +1,16 @@
 import base64
 import datetime
+import json
+import mimetypes
 import os
 import io
 import csv
 from firebase_admin import initialize_app, storage
 from firebase_functions import https_fn
 from firebase_functions.options import set_global_options
+from httpx import stream
 from openai import OpenAI
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -24,7 +27,7 @@ initialize_app()
 set_global_options(max_instances=10)
 
 # 環境変数からOpenAI APIキーを取得
-openai_api_key = "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"
+openai_api_key = "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"
 client = OpenAI(api_key=openai_api_key)
 headers = {
     'Access-Control-Allow-Origin': '*',
@@ -38,67 +41,44 @@ headers = {
 @https_fn.on_request()
 def get_image(req: https_fn.Request) -> https_fn.Response:
     """
-    Firebase Storageから画像リストを取得し、指定されたindexの画像を返すAPI。
-    例： /get_image?index=0
+    Firebase Storageから指定した名称の画像のダウンロードURLを取得します。
+
+    Args:
+        image_name (str): 取得したい画像のファイル名（例: 'photo.jpg'）。
+
+    Returns:
+        str or None: 画像のダウンロードURL。ファイルが存在しない場合はNone。
     """
     try:
-        # クエリパラメータから 'index' を取得し、整数に変換
-        try:
-            index = int(req.args.get('index', -1))
-        except (ValueError, TypeError):
-            return create_response(jsonify({"message": "index不正"}))
-
-        if index < 0:
-            return create_response(jsonify({"message": "index不正"}))
-
         # Storageバケットへの参照を取得
         bucket = storage.bucket()
-        print(bucket)
-        blobs = bucket.list_blobs(prefix="images/")
-        for blob in blobs:
-            print(f"ファイルが見つかりました: {blob.name}")
+        image_name = req.args.get('image_name')
+        if image_name is None:
+            return create_response(jsonify({"message": '"image_name" is nothing'}))
 
-        # 指定したフォルダ内のファイル一覧を取得し、すぐにリストに変換
-        all_blobs = list(bucket.list_blobs(prefix="images/"))
-        print(len(all_blobs))
+        # 画像のファイルパスを指定してBlob（ファイル）への参照を作成
+        # 例: 'images/photo.jpg' のようにフォルダ名を含めることもできます
+        blob = bucket.blob(f'votes/images/{image_name}')
 
-        # 取得できたオブジェクトの名前をすべて出力
-        # フォルダ自体を除外する処理を追加
-        image_blobs = sorted(
-            [blob for blob in all_blobs if not blob.name.endswith('/')],
-            key=lambda x: x.name
+        # ファイルが存在するか確認
+        if not blob.exists():
+            print(f"Error: File '{image_name}' not found.")
+            return create_response(jsonify({"message": f"Error: File '{image_name}' not found."}))
+
+        # ファイルのMIMEタイプを推測
+        mimetype, _ = mimetypes.guess_type(image_name)
+        if not mimetype:
+            mimetype = 'application/octet-stream' # 推測できない場合は汎用タイプを使用
+
+        stream_data = blob.download_as_bytes()
+        return send_file(
+            io.BytesIO(stream_data),
+            mimetype=mimetype
         )
 
-        for blob in image_blobs:
-            print(f"見つかったファイル: {blob.name}")
-
-        # リストが空かどうか確認
-        if not image_blobs:
-            # ファイルがない場合はエラーレスポンスを返す
-            return create_response(jsonify({"message": "指定されたプレフィックスにファイルが見つかりません。"}))
-
-        print("インデックス:" + str(index))
-        print("合計件数:" + str(len(image_blobs)))
-
-        # Indexがリストの範囲内かチェック
-        if not (0 <= index < len(image_blobs)):
-            return create_response(jsonify({"message": '{"error": "Index out of range"}'}))
-
-        # 指定されたIndexの画像Blobを取得
-        target_blob = image_blobs[index]
-
-        # 画像データをバイトとしてダウンロード
-        image_data = target_blob.download_as_bytes()
-
-        # 画像のMIMEタイプ（Content-Type）を決定
-        mimetype = target_blob.content_type or 'application/octet-stream'
-
-        # firebase_functions.Responseオブジェクトを使って画像データを直接返す
-        return create_response(jsonify(image_data))
-
     except Exception as e:
-        # エラーハンドリング
-        return create_response(jsonify({"message": "エラー発生:" + str(e)}))
+        print(f"An error occurred: {e}")
+        return jsonify({"message": f"An error occurred: {e}"})
 
 @https_fn.on_request()
 def hello_world(req: https_fn.Request) -> https_fn.Response:
@@ -106,69 +86,14 @@ def hello_world(req: https_fn.Request) -> https_fn.Response:
     print("サーバーテスト: Hello, World リクエストを受信")
 
     # 成功を示す HTTP ステータスコード200を明示的に返す
-    return create_response(jsonify({"message": "こんにちは、テスト送信は成功しました。"}))
+    return create_response(jsonify({"message": "Success Test"}))
 
-
-@https_fn.on_request()
-def generate_images_from_csv(req: https_fn.Request) -> https_fn.Response:
-    """
-    POSTリクエストで受け取ったCSVファイルから画像を生成し、Firebase Storageに格納する関数。
-    """
-    # POSTリクエストか確認
-    if req.method != 'POST':
-        return create_response(jsonify({"message": "POST送信してください"}))
-
-    # CSVファイルをリクエストボディから取得
-    try:
-        csv_data = req.data.decode('utf-8')
-        csv_reader = csv.reader(io.StringIO(csv_data))
-        # ヘッダー行をスキップ
-        next(csv_reader)
-    except Exception as e:
-        return create_response(jsonify({"message": "エラー発生:" + str(e)}))
-
-    # Storageバケットへの参照を取得
-    bucket = storage.bucket()
-
-    # CSVの各行を処理
-    for i, row in enumerate(csv_reader):
-        if not row:
-            continue
-
-        prompt = row[0]
-        try:
-            # OpenAI DALL-E 3 APIを呼び出し
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                n=1,
-                size="1024x1024"
-            )
-            image_url = response.data[0].url
-
-            # 画像データをダウンロード
-            import requests
-            image_data = requests.get(image_url).content
-
-            # ファイル名を生成
-            file_name = f"image_{i + 1}_{os.path.basename(image_url).split('.')[0]}.png"
-            blob = bucket.blob(f"images/{file_name}")
-
-            # Storageに画像をアップロード
-            blob.upload_from_string(image_data, content_type='image/png')
-            print(f"画像 '{file_name}' を正常にアップロードしました。")
-
-        except Exception as e:
-            print(f"エラー: 画像の生成またはアップロードに失敗しました - {str(e)}")
-            continue  # エラーが発生しても処理を続行
-
-    return create_response(jsonify({"message": "成功しました！"}))
-
-@https_fn.on_request()
+@https_fn.on_request(timeout_sec=300)
 def generate_and_save_image(req: https_fn.Request) -> https_fn.Response:
 
     # URLクエリパラメータからプロンプトを取得
     prompt = req.args.get('prompt')
+    size = req.args.get('size')
     print('起動')
     print(prompt)
     if not prompt:
@@ -178,10 +103,11 @@ def generate_and_save_image(req: https_fn.Request) -> https_fn.Response:
     bucket = storage.bucket()
 
     try:
-        # OpenAI DALL-E 3 APIを呼び出し
+        # OpenAI gpt-image-1 APIを呼び出し
         response = client.images.generate(
             model="gpt-image-1",  # ←ここを変更
             prompt=prompt,
+            size=size,
         )
 
         # base64エンコードされた画像データを取得し、バイトデータにデコード
@@ -201,7 +127,7 @@ def generate_and_save_image(req: https_fn.Request) -> https_fn.Response:
         response_message = f'画像 "{file_name}" を正常に生成・アップロードしました。'
         print(response_message)
 
-        return create_response(jsonify({"message": "成功しました！","image_data":image_data}))
+        return create_response(jsonify({"message": "成功しました！"}))
 
     except Exception as e:
         error_message = f'エラー: 画像の生成またはアップロードに失敗しました - {str(e)}'
@@ -209,7 +135,7 @@ def generate_and_save_image(req: https_fn.Request) -> https_fn.Response:
         return create_response(jsonify({"message": error_message}))
 
 
-@https_fn.on_request()
+@https_fn.on_request(timeout_sec=300)
 def chat_with_openai(req: https_fn.Request) -> https_fn.Response:
     try:
         # Get the user's message from the request
@@ -237,6 +163,75 @@ def chat_with_openai(req: https_fn.Request) -> https_fn.Response:
 
     except Exception as e:
         return create_response(jsonify({"error": str(e)}))
+
+
+@https_fn.on_request(timeout_sec=300)
+def vote_counter(req: https_fn.Request) -> https_fn.Response:
+
+    # リクエストから投票項目を取得
+    voted_item = req.args.get('item')
+    if voted_item is None:
+        return create_response(jsonify({"message": '"item" is nothing'}))
+
+    # JSONファイル名とパス
+    file_name = 'vote_counts.json'
+    file_path = f'votes/{file_name}'
+
+    # ストレージから現在の投票データを取得
+    bucket = storage.bucket()
+    blob = bucket.blob(file_path)
+
+    try:
+        # ファイルが存在する場合
+        file_data = blob.download_as_text()
+        vote_data = json.loads(file_data)
+    except Exception:
+        # ファイルが存在しない場合
+        vote_data = {}
+
+    # 投票数をインクリメント
+    vote_data[voted_item] = vote_data.get(voted_item, 0) + 1
+
+    # 更新されたデータをJSON形式で保存
+    blob.upload_from_string(json.dumps(vote_data, indent=4), content_type='application/json')
+
+    # 成功レスポンスを返す
+    response = {
+        'message': f'"{voted_item}"に投票しました。 現在：{vote_data}',
+        'current_counts': vote_data
+    }
+    return create_response(jsonify(response))
+
+@https_fn.on_request(timeout_sec=300)
+def get_vote_counts(req: https_fn.Request) -> https_fn.Response:
+    """
+    Firebase StorageからJSONファイルを読み込み、その内容をJSONレスポンスとして返します。
+    """
+    try:
+        # Storageバケットへの参照を取得
+        bucket = storage.bucket()
+
+        # 目的のファイルへの参照を作成
+        blob = bucket.blob('votes/vote_counts.json')
+
+        # ファイルが存在するか確認
+        if not blob.exists():
+            return create_response(jsonify({"message":"File not found"}))
+        print('start reading vote_counts.json')
+        # ファイルの中身を文字列としてダウンロード
+        json_data_str = blob.download_as_string()
+        print('start json convert')
+        # 文字列をJSONオブジェクトにパース
+        vote_counts = json.loads(json_data_str)
+        print('end json convert -start')
+        print(vote_counts)
+        print('end json convert -end')
+        # JSONレスポンスを返す
+        return create_response(jsonify(vote_counts))
+
+    except Exception as e:
+        # エラーが発生した場合、500エラーとして返す
+        return create_response(jsonify({"message": "Error:" + str(e)}))
 
 def create_response(res: jsonify):
     response = res

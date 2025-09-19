@@ -59,7 +59,7 @@ POP仕様
 参考データ（感想の文字起こし）
 ${props.thoughts}
 `;
-      const response = await fetch(`${API_ENDPOINT}?prompt=${prompt}`, {
+      const response = await fetch(`${API_ENDPOINT}?prompt=${prompt}&size=${popSize.width}x${popSize.height}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
